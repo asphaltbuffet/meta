@@ -1,0 +1,99 @@
+name: build
+
+on:
+  workflow_call:
+    inputs:
+      go_version:
+        required: false
+        type: string
+        default: stable
+    secrets:
+      gh_pat:
+        required: false
+      CODECOV_TOKEN:
+        required: true
+      SONAR_TOKEN:
+        required: true
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    env:
+      GH_PAT: ${{ secrets.gh_pat }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.gh_pat }}
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache: true
+          check-latest: true
+      - run: |
+          git config --global url."https://${{ secrets.gh_pat }}@github.com/asphaltbuffet".insteadOf "https://github.com/asphaltbuffet"
+        if: env.GH_PAT != null
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      GO111MODULE: "on"
+      GH_PAT: ${{ secrets.gh_pat }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - run: |
+          git config --global url."https://${{ secrets.gh_pat }}@github.com/asphaltbuffet".insteadOf "https://github.com/asphaltbuffet"
+        if: env.GH_PAT != null
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.gh_pat }}
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache: true
+      - name: Set Up Tools
+        run: task setup -f
+      - name: Build & Test
+        run: task ci
+      - name: Archive code coverage results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage-report-${{ matrix.os }}
+          path: bin
+      - name: Upload code coverage results to Codecov
+        uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          file: ./bin/coverage.out
+          flags: ${{ runner.os }}
+  sonarCloudTrigger:
+    needs: build
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
+
+      - name: Download code coverage results
+        uses: actions/download-artifact@v4
+        with:
+          name: code-coverage-report-ubuntu-latest
+          path: bin
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
