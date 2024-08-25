@@ -10,10 +10,6 @@ on:
     secrets:
       gh_pat:
         required: false
-      CODECOV_TOKEN:
-        required: true
-      SONAR_TOKEN:
-        required: true
 
 jobs:
   govulncheck:
